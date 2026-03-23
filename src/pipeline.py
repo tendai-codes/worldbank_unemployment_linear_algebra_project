@@ -4,9 +4,11 @@ from src.config import (
     INDICATORS,
     SAVE_CSV_SNAPSHOTS,
 )
-from src.api_client import fetch_indicator_data
+from src.api_client import fetch_indicator_data, fetch_country_metadata
 from src.data_processing import (
     raw_to_dataframe,
+    country_metadata_to_dataframe,
+    merge_country_metadata,
     remove_aggregate_entities,
     build_country_year_matrix,
     build_panel_dataset,
@@ -37,10 +39,15 @@ def run_unemployment_analysis():
     )
     print("Verification: raw rows fetched =", len(raw_unemployment))
 
+    raw_country_metadata = fetch_country_metadata()
+    country_metadata_df = country_metadata_to_dataframe(raw_country_metadata)
+
     print("\nStep 2: Convert raw rows to DataFrame")
     df_unemployment = raw_to_dataframe(raw_unemployment, "unemployment_rate")
+    df_unemployment = merge_country_metadata(df_unemployment, country_metadata_df)
     df_unemployment = remove_aggregate_entities(df_unemployment)
     df_unemployment = df_unemployment.sort_values(["country_code", "year"]).reset_index(drop=True)
+
     print(df_unemployment.head())
     print("Verification: dataframe shape =", df_unemployment.shape)
 
@@ -97,26 +104,36 @@ def run_unemployment_analysis():
         "pca_results": unemployment_pca,
     }
 
-
 def run_multi_indicator_analysis():
     print("\n=== PART 2: MULTI-INDICATOR ANALYSIS ===")
+
+    raw_country_metadata = fetch_country_metadata()
+    country_metadata_df = country_metadata_to_dataframe(raw_country_metadata)
 
     indicator_dataframes = {}
 
     for feature_name, indicator_code in INDICATORS.items():
-        print(f"\nStep 1: Fetch {feature_name}")
-        raw_rows = fetch_indicator_data(indicator_code, START_YEAR, END_YEAR)
-        print("Verification: raw rows fetched =", len(raw_rows))
+        try:
+            print(f"\nStep 1: Fetch {feature_name}")
+            raw_rows = fetch_indicator_data(indicator_code, START_YEAR, END_YEAR)
+            print("Verification: raw rows fetched =", len(raw_rows))
 
-        df_feature = raw_to_dataframe(raw_rows, feature_name)
-        df_feature = remove_aggregate_entities(df_feature)
-        df_feature = df_feature.sort_values(["country_code", "year"]).reset_index(drop=True)
+            df_feature = raw_to_dataframe(raw_rows, feature_name)
+            df_feature = merge_country_metadata(df_feature, country_metadata_df)
+            df_feature = remove_aggregate_entities(df_feature)
+            df_feature = df_feature.sort_values(["country_code", "year"]).reset_index(drop=True)
 
-        print(df_feature.head())
-        print("Verification: dataframe shape =", df_feature.shape)
+            print(df_feature.head())
+            print("Verification: dataframe shape =", df_feature.shape)
 
-        indicator_dataframes[feature_name] = df_feature
-        save_if_needed(df_feature, f"data/{feature_name}.csv")
+            indicator_dataframes[feature_name] = df_feature
+            save_if_needed(df_feature, f"data/{feature_name}.csv")
+
+        except Exception as e:
+            print(f"Failed for {feature_name}: {e}")
+
+    print("\nIndicators successfully loaded:")
+    print(indicator_dataframes.keys())
 
     print("\nStep 2: Build merged panel dataset")
     panel_df = build_panel_dataset(indicator_dataframes)
@@ -128,7 +145,7 @@ def run_multi_indicator_analysis():
     save_if_needed(panel_df, "data/worldbank_panel.csv")
 
     print("\nStep 3: Build average country-feature matrix")
-    feature_columns = list(INDICATORS.keys())
+    feature_columns = [col for col in INDICATORS.keys() if col in panel_df.columns]
     feature_matrix = build_average_feature_matrix(panel_df, feature_columns)
 
     print(feature_matrix.head())
@@ -163,7 +180,6 @@ def run_multi_indicator_analysis():
         "country_similarity": feature_similarity,
         "pca_results": feature_pca,
     }
-
 
 def run_pipeline():
     unemployment_results = run_unemployment_analysis()
