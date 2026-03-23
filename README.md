@@ -1,4 +1,4 @@
-# World Bank Linear Algebra Project (Modular Version)
+# World Bank Linear Algebra Project
 
 This project uses World Bank API data to study matrix structure in global economic data.
 
