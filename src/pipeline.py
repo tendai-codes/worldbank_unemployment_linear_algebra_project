@@ -1,9 +1,6 @@
-from src.config import (
-    START_YEAR,
-    END_YEAR,
-    INDICATORS,
-    SAVE_CSV_SNAPSHOTS,
-)
+from pathlib import Path
+
+from src.config import START_YEAR, END_YEAR, INDICATORS, SAVE_CSV_SNAPSHOTS
 from src.api_client import fetch_indicator_data, fetch_country_metadata
 from src.data_processing import (
     raw_to_dataframe,
@@ -12,6 +9,8 @@ from src.data_processing import (
     remove_aggregate_entities,
     build_country_year_matrix,
     build_panel_dataset,
+    filter_countries_with_complete_indicator_gaps,
+    interpolate_panel_by_country,
     build_average_feature_matrix,
 )
 from src.matrix_analysis import (
@@ -23,6 +22,10 @@ from src.matrix_analysis import (
     run_pca,
 )
 
+DATA_DIR = Path("data")
+DATA_DIR.mkdir(exist_ok=True)
+
+
 def save_if_needed(df, path):
     if SAVE_CSV_SNAPSHOTS:
         df.to_csv(path, index=True if df.index.name is not None else False)
@@ -32,11 +35,7 @@ def run_unemployment_analysis():
     print("\n=== PART 1: UNEMPLOYMENT ANALYSIS ===")
 
     print("\nStep 1: Fetch unemployment data")
-    raw_unemployment = fetch_indicator_data(
-        INDICATORS["unemployment"],
-        START_YEAR,
-        END_YEAR
-    )
+    raw_unemployment = fetch_indicator_data(INDICATORS["unemployment"], START_YEAR, END_YEAR)
     print("Verification: raw rows fetched =", len(raw_unemployment))
 
     raw_country_metadata = fetch_country_metadata()
@@ -51,14 +50,14 @@ def run_unemployment_analysis():
     print(df_unemployment.head())
     print("Verification: dataframe shape =", df_unemployment.shape)
 
-    save_if_needed(df_unemployment, "data/unemployment.csv")
+    save_if_needed(df_unemployment, DATA_DIR / "unemployment.csv")
 
     print("\nStep 3: Build country-year unemployment matrix")
     unemployment_matrix = build_country_year_matrix(df_unemployment, "unemployment_rate")
     print(unemployment_matrix.head())
     print("Verification: matrix shape =", unemployment_matrix.shape)
 
-    save_if_needed(unemployment_matrix, "data/unemployment_matrix.csv")
+    save_if_needed(unemployment_matrix, DATA_DIR / "unemployment_matrix.csv")
 
     print("\nStep 4: Inspect missingness")
     missing_by_country, missing_by_year = inspect_missingness(unemployment_matrix)
@@ -88,8 +87,7 @@ def run_unemployment_analysis():
 
     print("\nStep 9: PCA on unemployment trajectories")
     unemployment_pca = run_pca(unemployment_matrix, n_components=2)
-    print("Verification: explained variance ratio =",
-          unemployment_pca["explained_variance_ratio"])
+    print("Verification: explained variance ratio =", unemployment_pca["explained_variance_ratio"])
     print(unemployment_pca["pca_scores"].head())
 
     return {
@@ -104,6 +102,7 @@ def run_unemployment_analysis():
         "pca_results": unemployment_pca,
     }
 
+
 def run_multi_indicator_analysis():
     print("\n=== PART 2: MULTI-INDICATOR ANALYSIS ===")
 
@@ -112,74 +111,85 @@ def run_multi_indicator_analysis():
 
     indicator_dataframes = {}
 
+    print("\nStep 11: Fetch all indicators and remove aggregates indicator-by-indicator")
     for feature_name, indicator_code in INDICATORS.items():
-        try:
-            print(f"\nStep 1: Fetch {feature_name}")
-            raw_rows = fetch_indicator_data(indicator_code, START_YEAR, END_YEAR)
-            print("Verification: raw rows fetched =", len(raw_rows))
+        print(f"\nFetching {feature_name} ({indicator_code})")
+        raw_rows = fetch_indicator_data(indicator_code, START_YEAR, END_YEAR)
+        df_feature = raw_to_dataframe(raw_rows, feature_name)
+        df_feature = merge_country_metadata(df_feature, country_metadata_df)
+        df_feature = remove_aggregate_entities(df_feature)
+        df_feature = df_feature.sort_values(["country_code", "year"]).reset_index(drop=True)
+        indicator_dataframes[feature_name] = df_feature
 
-            df_feature = raw_to_dataframe(raw_rows, feature_name)
-            df_feature = merge_country_metadata(df_feature, country_metadata_df)
-            df_feature = remove_aggregate_entities(df_feature)
-            df_feature = df_feature.sort_values(["country_code", "year"]).reset_index(drop=True)
-
-            print(df_feature.head())
-            print("Verification: dataframe shape =", df_feature.shape)
-
-            indicator_dataframes[feature_name] = df_feature
-            save_if_needed(df_feature, f"data/{feature_name}.csv")
-
-        except Exception as e:
-            print(f"Failed for {feature_name}: {e}")
+        print("Verification: dataframe shape =", df_feature.shape)
+        save_if_needed(df_feature, DATA_DIR / f"{feature_name}.csv")
 
     print("\nIndicators successfully loaded:")
-    print(indicator_dataframes.keys())
+    print(list(indicator_dataframes.keys()))
 
-    print("\nStep 2: Build merged panel dataset")
+    print("\nStep 12: Build merged country-year panel")
     panel_df = build_panel_dataset(indicator_dataframes)
     print(panel_df.head())
     print("Verification: panel shape =", panel_df.shape)
     print("\nMissing values by column:")
     print(panel_df.isna().sum())
+    save_if_needed(panel_df, DATA_DIR / "worldbank_panel.csv")
 
-    save_if_needed(panel_df, "data/worldbank_panel.csv")
+    print("\nStep 13: Remove countries that are fully missing at least one whole indicator series")
+    feature_columns = list(INDICATORS.keys())
+    panel_df_filtered, countries_removed, missing_detail = filter_countries_with_complete_indicator_gaps(
+        panel_df,
+        feature_columns,
+    )
+    print("Countries removed:", len(countries_removed))
+    if not countries_removed.empty:
+        print(countries_removed.head(20))
+    print("Filtered panel shape:", panel_df_filtered.shape)
 
-    print("\nStep 3: Build average country-feature matrix")
-    feature_columns = [col for col in INDICATORS.keys() if col in panel_df.columns]
-    feature_matrix = build_average_feature_matrix(panel_df, feature_columns)
+    print("\nStep 13.6: Interpolate only internal gaps within each remaining country series")
+    panel_df_interpolated = interpolate_panel_by_country(panel_df_filtered, feature_columns)
+    print("Remaining missing values by feature after interpolation:")
+    print(panel_df_interpolated[feature_columns].isna().sum())
 
+    save_if_needed(panel_df_interpolated, DATA_DIR / "worldbank_panel_cleaned.csv")
+
+    print("\nStep 14: Build average country-feature matrix")
+    feature_matrix = build_average_feature_matrix(panel_df_interpolated, feature_columns)
     print(feature_matrix.head())
     print("Verification: feature matrix shape =", feature_matrix.shape)
     print("Verification: total missing values =", feature_matrix.isna().sum().sum())
+    save_if_needed(feature_matrix, DATA_DIR / "feature_matrix.csv")
 
-    save_if_needed(feature_matrix, "data/feature_matrix.csv")
-
-    print("\nStep 4: Compute rank")
+    print("\nStep 15: Compute rank")
     feature_rank = compute_rank(feature_matrix)
     print("Verification: feature matrix rank =", feature_rank)
 
-    print("\nStep 5: Correlation between features")
+    print("\nStep 16: Correlation between features")
     feature_corr = compute_column_correlation(feature_matrix)
     print(feature_corr.round(3))
 
-    print("\nStep 6: Country similarity in feature space")
+    print("\nStep 17: Country similarity in feature space")
     feature_similarity = compute_country_similarity(feature_matrix)
     print(feature_similarity.iloc[:5, :5].round(3))
 
-    print("\nStep 7: PCA on country-feature matrix")
+    print("\nStep 18: PCA on country-feature matrix")
     feature_pca = run_pca(feature_matrix, n_components=2)
-    print("Verification: explained variance ratio =",
-          feature_pca["explained_variance_ratio"])
+    print("Verification: explained variance ratio =", feature_pca["explained_variance_ratio"])
     print(feature_pca["pca_scores"].head())
 
     return {
         "panel_df": panel_df,
+        "panel_df_filtered": panel_df_filtered,
+        "panel_df_interpolated": panel_df_interpolated,
+        "missing_detail": missing_detail,
+        "countries_removed": countries_removed,
         "feature_matrix": feature_matrix,
         "rank": feature_rank,
         "feature_correlation": feature_corr,
         "country_similarity": feature_similarity,
         "pca_results": feature_pca,
     }
+
 
 def run_pipeline():
     unemployment_results = run_unemployment_analysis()
