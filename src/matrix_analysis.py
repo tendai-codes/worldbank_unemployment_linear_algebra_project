@@ -31,6 +31,8 @@ def compute_rank(matrix_df):
     A single integer describing the matrix dimensionality.
     """
     clean_df = matrix_df.dropna(axis=0).dropna(axis=1)
+    if clean_df.empty:
+        raise ValueError("Matrix is empty after dropping missing values; rank cannot be computed.")
     return np.linalg.matrix_rank(clean_df.values)
 
 
@@ -46,6 +48,8 @@ def compute_ref_rref(matrix_df, row_limit=10, col_limit=8, rounding=3):
     A manageable demonstration of pivots and row reduction.
     """
     subset = matrix_df.dropna(axis=0).iloc[:row_limit, :col_limit].copy()
+    if subset.empty:
+        raise ValueError("Subset for REF/RREF is empty after dropping missing rows.")
     subset = subset.round(rounding)
 
     sympy_matrix = Matrix(subset.values)
@@ -73,8 +77,9 @@ def compute_column_correlation(matrix_df):
     A correlation matrix that reveals similar or unusual years.
     """
     clean_df = matrix_df.dropna(axis=0)
+    if clean_df.empty:
+        raise ValueError("No complete rows available for correlation.")
     return clean_df.corr()
-
 
 def compute_country_similarity(matrix_df):
     """
@@ -88,13 +93,11 @@ def compute_country_similarity(matrix_df):
     A country-by-country similarity matrix.
     """
     clean_df = matrix_df.dropna(axis=0)
+    if clean_df.empty:
+        raise ValueError("No complete rows available for similarity.")
 
     similarity = cosine_similarity(clean_df.values)
-    similarity_df = pd.DataFrame(
-        similarity,
-        index=clean_df.index,
-        columns=clean_df.index
-    )
+    similarity_df = pd.DataFrame(similarity, index=clean_df.index, columns=clean_df.index)
     return similarity_df
 
 
@@ -109,6 +112,10 @@ def run_pca(matrix_df, n_components=2):
     Lower-dimensional scores plus explained variance ratios.
     """
     clean_df = matrix_df.dropna(axis=0).copy()
+    if clean_df.empty:
+        raise ValueError("No complete rows available for PCA.")
+    if n_components > min(clean_df.shape):
+        raise ValueError("n_components is larger than the allowable PCA dimensionality.")
 
     scaler = StandardScaler()
     scaled_data = scaler.fit_transform(clean_df.values)
@@ -119,7 +126,7 @@ def run_pca(matrix_df, n_components=2):
     pca_df = pd.DataFrame(
         pca_scores,
         index=clean_df.index,
-        columns=[f"PC{i+1}" for i in range(n_components)]
+        columns=[f"PC{i+1}" for i in range(n_components)],
     )
 
     return {
@@ -130,3 +137,4 @@ def run_pca(matrix_df, n_components=2):
         "explained_variance_ratio": pca.explained_variance_ratio_,
         "components": pca.components_,
     }
+
