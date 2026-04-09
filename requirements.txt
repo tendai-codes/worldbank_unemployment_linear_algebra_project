@@ -9,3 +9,4 @@ seaborn
 ipykernel
 jupyter
 plotly
+xgboost
