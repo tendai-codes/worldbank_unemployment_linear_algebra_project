@@ -19,7 +19,6 @@ def load_model_features(path: str | Path) -> list[str]:
     path = Path(path)
     df = pd.read_csv(path)
 
-    # Accept either a column named "feature" or a single-column CSV
     if "feature" in df.columns:
         return df["feature"].dropna().astype(str).tolist()
 
@@ -32,6 +31,6 @@ def load_model_features(path: str | Path) -> list[str]:
     )
 
 
-def load_cv_metrics(path: str | Path) -> pd.DataFrame:
+def load_feature_matrix(path: str | Path) -> pd.DataFrame:
     path = Path(path)
-    return pd.read_csv(path)
+    return pd.read_csv(path, index_col=0)

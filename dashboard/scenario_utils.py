@@ -4,10 +4,6 @@ import pandas as pd
 
 
 def apply_scenario_preset(country_row: dict, preset: str) -> dict:
-    """
-    Apply a simple scenario preset to the selected country baseline.
-    Returns a modified copy of the input dictionary.
-    """
     values = country_row.copy()
 
     if preset == "Custom":
@@ -37,10 +33,6 @@ def apply_scenario_preset(country_row: dict, preset: str) -> dict:
 
 
 def build_model_input_row(scenario_values: dict, model_features: list[str]) -> pd.DataFrame:
-    """
-    Build a one-row dataframe in the exact feature order expected by the trained model.
-    Missing features default to 0.0.
-    """
     row = {}
     for feature in model_features:
         row[feature] = float(scenario_values.get(feature, 0.0))

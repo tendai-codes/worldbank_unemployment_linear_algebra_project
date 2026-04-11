@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# Ensure project root is on sys.path when running via Streamlit
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -16,7 +16,7 @@ from dashboard.model_utils import (
     load_model,
     load_country_baselines,
     load_model_features,
-    load_cv_metrics,
+    load_feature_matrix,
 )
 from dashboard.scenario_utils import (
     apply_scenario_preset,
@@ -32,7 +32,9 @@ st.set_page_config(
 MODEL_PATH = PROJECT_ROOT / "models" / "downturn_random_forest.joblib"
 BASELINES_PATH = PROJECT_ROOT / "models" / "country_baselines_latest.csv"
 FEATURES_PATH = PROJECT_ROOT / "models" / "model_features.csv"
-CV_METRICS_PATH = PROJECT_ROOT / "models" / "cv_metrics.csv"
+FEATURE_MATRIX_PATH = PROJECT_ROOT / "data" / "feature_matrix.csv"
+
+CLASSIFICATION_THRESHOLD = 0.35
 
 FEATURE_LABELS = {
     "gdp_growth": "GDP growth",
@@ -81,15 +83,58 @@ def prettify_feature_name(name: str) -> str:
     return FEATURE_LABELS.get(name, name.replace("_", " ").title())
 
 
-def show_missing_artifact_error(path: Path, label: str) -> None:
-    st.error(f"{label} not found at\n\n`{path}`")
-    st.stop()
+def feature_slider_bounds(feature: str) -> tuple[float, float, float]:
+    if "life_expectancy" in feature:
+        return 30.0, 90.0, 0.1
+    if "population_growth" in feature:
+        return -5.0, 10.0, 0.1
+    if "gdp_growth" in feature:
+        return -20.0, 20.0, 0.1
+    if "inflation" in feature:
+        return -20.0, 50.0, 0.1
+    if "unemployment" in feature:
+        return 0.0, 50.0, 0.1
+    return -20.0, 20.0, 0.1
+
+
+def find_similar_countries(
+    selected_country_code: str,
+    feature_matrix: pd.DataFrame,
+    baselines_df: pd.DataFrame,
+    top_n: int = 5,
+) -> pd.DataFrame:
+    if selected_country_code not in feature_matrix.index:
+        return pd.DataFrame(columns=["Country", "Country code", "Distance"])
+
+    target_vector = feature_matrix.loc[selected_country_code].values
+
+    distances = (
+        feature_matrix.drop(index=selected_country_code)
+        .apply(lambda row: np.linalg.norm(row.values - target_vector), axis=1)
+        .sort_values()
+        .head(top_n)
+    )
+
+    code_to_name = (
+        baselines_df[["country_code", "country"]]
+        .drop_duplicates()
+        .set_index("country_code")["country"]
+        .to_dict()
+    )
+
+    return pd.DataFrame(
+        {
+            "Country": [code_to_name.get(code, code) for code in distances.index],
+            "Country code": distances.index,
+            "Distance": distances.values.round(4),
+        }
+    )
 
 
 st.title("Macroeconomic Downturn Risk Simulator")
 st.write(
-    "Interactive scenario tool built from the Part 3 country-year predictive model. "
-    "Adjust present and lagged indicators to estimate next-year downturn probability."
+    "Choose a country, adjust macroeconomic conditions, and estimate the model's "
+    "predicted probability of a downturn next year."
 )
 
 if not MODEL_PATH.exists():
@@ -113,26 +158,41 @@ if not FEATURES_PATH.exists():
     )
     st.stop()
 
+if not FEATURE_MATRIX_PATH.exists():
+    st.error(
+        f"Feature matrix file not found at\n\n`{FEATURE_MATRIX_PATH}`.\n\n"
+        "Export `feature_matrix.csv` into the data folder first."
+    )
+    st.stop()
+
 model = load_model(MODEL_PATH)
 country_baselines = load_country_baselines(BASELINES_PATH)
 model_features = load_model_features(FEATURES_PATH)
-cv_metrics = load_cv_metrics(CV_METRICS_PATH) if CV_METRICS_PATH.exists() else None
+feature_matrix = load_feature_matrix(FEATURE_MATRIX_PATH)
 
 if country_baselines.empty:
     st.error("Country baselines file is empty.")
     st.stop()
 
-country_options = sorted(country_baselines["country_code"].dropna().unique().tolist())
+country_lookup = (
+    country_baselines[["country", "country_code"]]
+    .drop_duplicates()
+    .sort_values("country")
+    .reset_index(drop=True)
+)
 
-with st.sidebar:
-    st.header("Scenario setup")
+country_name_options = country_lookup["country"].tolist()
 
-    selected_country = st.selectbox(
-        "Select country baseline",
-        options=country_options,
+selector_col, preset_col = st.columns([1.6, 1.0])
+
+with selector_col:
+    selected_country_name = st.selectbox(
+        "Select country",
+        options=country_name_options,
         index=0,
     )
 
+with preset_col:
     preset = st.selectbox(
         "Scenario preset",
         options=[
@@ -145,57 +205,29 @@ with st.sidebar:
         index=0,
     )
 
+selected_country_code = country_lookup.loc[
+    country_lookup["country"] == selected_country_name,
+    "country_code"
+].iloc[0]
+
 country_row = country_baselines.loc[
-    country_baselines["country_code"] == selected_country
+    country_baselines["country_code"] == selected_country_code
 ].iloc[0].to_dict()
 
 scenario_values = apply_scenario_preset(country_row.copy(), preset)
 
-st.subheader(f"Country baseline: {selected_country}")
+st.subheader(f"Country baseline: {selected_country_name}")
 
 left_col, right_col = st.columns([1.1, 1.1])
 
-editable_features = [
-    "unemployment",
-    "inflation",
-    "gdp_growth",
-    "life_expectancy",
-    "population_growth",
-    "unemployment_lag1",
-    "inflation_lag1",
-    "gdp_growth_lag1",
-    "life_expectancy_lag1",
-    "population_growth_lag1",
-    "unemployment_lag2",
-    "inflation_lag2",
-    "gdp_growth_lag2",
-    "life_expectancy_lag2",
-    "population_growth_lag2",
-    "unemployment_change_1y",
-    "inflation_change_1y",
-    "gdp_growth_change_1y",
-]
+editable_features = [feature for feature in model_features if feature in scenario_values]
 
 with left_col:
-    st.markdown("### Current and lagged inputs")
+    st.markdown("### Adjust macroeconomic inputs")
+
     for feature in editable_features:
-        if feature not in scenario_values:
-            continue
-
         default_value = float(scenario_values[feature])
-
-        if "life_expectancy" in feature:
-            min_value, max_value, step = 30.0, 90.0, 0.1
-        elif "population_growth" in feature:
-            min_value, max_value, step = -5.0, 10.0, 0.1
-        elif "gdp_growth" in feature:
-            min_value, max_value, step = -20.0, 20.0, 0.1
-        elif "inflation" in feature:
-            min_value, max_value, step = -20.0, 50.0, 0.1
-        elif "unemployment" in feature:
-            min_value, max_value, step = 0.0, 50.0, 0.1
-        else:
-            min_value, max_value, step = -20.0, 20.0, 0.1
+        min_value, max_value, step = feature_slider_bounds(feature)
 
         scenario_values[feature] = st.slider(
             INPUT_LABELS.get(feature, prettify_feature_name(feature)),
@@ -211,7 +243,7 @@ model_input = build_model_input_row(
 )
 
 probability = float(model.predict_proba(model_input)[0, 1])
-prediction = int(probability >= 0.5)
+prediction = int(probability >= CLASSIFICATION_THRESHOLD)
 
 with right_col:
     st.markdown("### Predicted downturn risk")
@@ -219,6 +251,8 @@ with right_col:
         label="Probability of downturn next year",
         value=f"{probability:.1%}",
     )
+
+    st.caption(f"Classification threshold: {CLASSIFICATION_THRESHOLD:.2f}")
 
     if prediction == 1:
         st.error("Model classification: downturn risk")
@@ -229,33 +263,37 @@ with right_col:
 
     comparison_rows = []
     for feature in editable_features:
-        if feature not in country_row or feature not in scenario_values:
-            continue
-
-        baseline_val = float(country_row[feature])
-        scenario_val = float(scenario_values[feature])
+        baseline_val = float(country_row.get(feature, 0.0))
+        scenario_val = float(scenario_values.get(feature, 0.0))
         delta_val = scenario_val - baseline_val
 
         comparison_rows.append(
             {
                 "Feature": INPUT_LABELS.get(feature, prettify_feature_name(feature)),
-                "Baseline": baseline_val,
-                "Scenario": scenario_val,
-                "Change": delta_val,
+                "Baseline": round(baseline_val, 3),
+                "Scenario": round(scenario_val, 3),
+                "Change": round(delta_val, 3),
             }
         )
 
     comparison_df = pd.DataFrame(comparison_rows)
-    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+    st.dataframe(comparison_df, width="stretch", hide_index=True)
 
-if cv_metrics is not None and not cv_metrics.empty:
-    st.markdown("---")
-    st.subheader("Cross-validation summary")
-    pretty_metrics = cv_metrics.copy()
-    if "model" in pretty_metrics.columns:
-        st.dataframe(pretty_metrics, use_container_width=True, hide_index=True)
-    else:
-        st.dataframe(pretty_metrics, use_container_width=True)
+st.markdown("---")
+
+similar_df = find_similar_countries(
+    selected_country_code=selected_country_code,
+    feature_matrix=feature_matrix,
+    baselines_df=country_baselines,
+    top_n=5,
+)
+
+st.subheader("Countries with similar macroeconomic profiles")
+
+if similar_df.empty:
+    st.info("No similar-country comparison is available for this selection.")
+else:
+    st.dataframe(similar_df, width="stretch", hide_index=True)
 
 if hasattr(model, "feature_importances_"):
     st.markdown("---")
@@ -292,10 +330,10 @@ if hasattr(model, "feature_importances_"):
         title_x=0.0,
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 st.markdown("---")
 st.caption(
-    "This dashboard uses the trained Part 3 classification model to simulate next-year "
-    "downturn risk from current and lagged macroeconomic indicators."
+    "This dashboard uses the trained Part 3 classification model to estimate "
+    "next-year downturn risk from current and lagged macroeconomic indicators."
 )
