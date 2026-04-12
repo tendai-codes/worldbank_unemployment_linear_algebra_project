@@ -1,4 +1,4 @@
-feature_name
+feature
 unemployment
 inflation
 gdp_growth
@@ -17,3 +17,10 @@ population_growth_lag2
 unemployment_change_1y
 inflation_change_1y
 gdp_growth_change_1y
+life_expectancy_change_1y
+population_growth_change_1y
+unemployment_trend_3y
+inflation_trend_3y
+gdp_growth_trend_3y
+life_expectancy_trend_3y
+population_growth_trend_3y

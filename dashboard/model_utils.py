@@ -34,3 +34,15 @@ def load_model_features(path: str | Path) -> list[str]:
 def load_feature_matrix(path: str | Path) -> pd.DataFrame:
     path = Path(path)
     return pd.read_csv(path, index_col=0)
+
+
+def load_optimal_threshold(path: str | Path, default: float = 0.35) -> float:
+    path = Path(path)
+    if not path.exists():
+        return default
+
+    df = pd.read_csv(path)
+    if df.empty or "optimal_threshold" not in df.columns:
+        return default
+
+    return float(df.loc[0, "optimal_threshold"])

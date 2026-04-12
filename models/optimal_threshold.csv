@@ -1,0 +1,2 @@
+threshold_method,optimal_threshold,accuracy,precision,recall,roc_auc,confusion_matrix
+youden_j,0.3387309640587842,0.7018181818181818,0.25295508274231676,0.37809187279151946,0.5548013369142922,"[[1051, 316], [176, 107]]"

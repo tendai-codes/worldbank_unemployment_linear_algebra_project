@@ -17,6 +17,7 @@ from dashboard.model_utils import (
     load_country_baselines,
     load_model_features,
     load_feature_matrix,
+    load_optimal_threshold,
 )
 from dashboard.scenario_utils import (
     apply_scenario_preset,
@@ -33,28 +34,34 @@ MODEL_PATH = PROJECT_ROOT / "models" / "downturn_random_forest.joblib"
 BASELINES_PATH = PROJECT_ROOT / "models" / "country_baselines_latest.csv"
 FEATURES_PATH = PROJECT_ROOT / "models" / "model_features.csv"
 FEATURE_MATRIX_PATH = PROJECT_ROOT / "data" / "feature_matrix.csv"
-
-CLASSIFICATION_THRESHOLD = 0.35
+THRESHOLD_PATH = PROJECT_ROOT / "models" / "optimal_threshold.csv"
 
 FEATURE_LABELS = {
     "gdp_growth": "GDP growth",
     "gdp_growth_change_1y": "GDP growth (1-year change)",
     "gdp_growth_lag1": "GDP growth (lag 1 year)",
     "gdp_growth_lag2": "GDP growth (lag 2 years)",
+    "gdp_growth_trend_3y": "GDP growth trend (3 years)",
     "inflation": "Inflation",
     "inflation_change_1y": "Inflation (1-year change)",
     "inflation_lag1": "Inflation (lag 1 year)",
     "inflation_lag2": "Inflation (lag 2 years)",
+    "inflation_trend_3y": "Inflation trend (3 years)",
     "unemployment": "Unemployment",
     "unemployment_change_1y": "Unemployment (1-year change)",
     "unemployment_lag1": "Unemployment (lag 1 year)",
     "unemployment_lag2": "Unemployment (lag 2 years)",
+    "unemployment_trend_3y": "Unemployment trend (3 years)",
     "life_expectancy": "Life expectancy",
+    "life_expectancy_change_1y": "Life expectancy (1-year change)",
     "life_expectancy_lag1": "Life expectancy (lag 1 year)",
     "life_expectancy_lag2": "Life expectancy (lag 2 years)",
+    "life_expectancy_trend_3y": "Life expectancy trend (3 years)",
     "population_growth": "Population growth",
+    "population_growth_change_1y": "Population growth (1-year change)",
     "population_growth_lag1": "Population growth (lag 1 year)",
     "population_growth_lag2": "Population growth (lag 2 years)",
+    "population_growth_trend_3y": "Population growth trend (3 years)",
 }
 
 INPUT_LABELS = {
@@ -63,19 +70,16 @@ INPUT_LABELS = {
     "gdp_growth": "GDP growth (%)",
     "life_expectancy": "Life expectancy",
     "population_growth": "Population growth (%)",
-    "unemployment_lag1": "Unemployment lag 1 (%)",
-    "inflation_lag1": "Inflation lag 1 (%)",
-    "gdp_growth_lag1": "GDP growth lag 1 (%)",
-    "life_expectancy_lag1": "Life expectancy lag 1",
-    "population_growth_lag1": "Population growth lag 1 (%)",
-    "unemployment_lag2": "Unemployment lag 2 (%)",
-    "inflation_lag2": "Inflation lag 2 (%)",
-    "gdp_growth_lag2": "GDP growth lag 2 (%)",
-    "life_expectancy_lag2": "Life expectancy lag 2",
-    "population_growth_lag2": "Population growth lag 2 (%)",
     "unemployment_change_1y": "Unemployment change (1 year)",
     "inflation_change_1y": "Inflation change (1 year)",
     "gdp_growth_change_1y": "GDP growth change (1 year)",
+    "life_expectancy_change_1y": "Life expectancy change (1 year)",
+    "population_growth_change_1y": "Population growth change (1 year)",
+    "unemployment_trend_3y": "Unemployment trend (3 years)",
+    "inflation_trend_3y": "Inflation trend (3 years)",
+    "gdp_growth_trend_3y": "GDP growth trend (3 years)",
+    "life_expectancy_trend_3y": "Life expectancy trend (3 years)",
+    "population_growth_trend_3y": "Population growth trend (3 years)",
 }
 
 
@@ -85,7 +89,7 @@ def prettify_feature_name(name: str) -> str:
 
 def feature_slider_bounds(feature: str) -> tuple[float, float, float]:
     if "life_expectancy" in feature:
-        return 30.0, 90.0, 0.1
+        return -10.0 if "change" in feature or "trend" in feature else 30.0, 10.0 if "change" in feature or "trend" in feature else 90.0, 0.1
     if "population_growth" in feature:
         return -5.0, 10.0, 0.1
     if "gdp_growth" in feature:
@@ -93,7 +97,7 @@ def feature_slider_bounds(feature: str) -> tuple[float, float, float]:
     if "inflation" in feature:
         return -20.0, 50.0, 0.1
     if "unemployment" in feature:
-        return 0.0, 50.0, 0.1
+        return -10.0 if "change" in feature or "trend" in feature else 0.0, 50.0, 0.1
     return -20.0, 20.0, 0.1
 
 
@@ -137,38 +141,21 @@ st.write(
     "predicted probability of a downturn next year."
 )
 
-if not MODEL_PATH.exists():
-    st.error(
-        f"Model file not found at\n\n`{MODEL_PATH}`.\n\n"
-        "Run `python train_downturn_model.py` first."
-    )
-    st.stop()
-
-if not BASELINES_PATH.exists():
-    st.error(
-        f"Country baseline file not found at\n\n`{BASELINES_PATH}`.\n\n"
-        "Run `python train_downturn_model.py` first."
-    )
-    st.stop()
-
-if not FEATURES_PATH.exists():
-    st.error(
-        f"Model feature file not found at\n\n`{FEATURES_PATH}`.\n\n"
-        "Run `python train_downturn_model.py` first."
-    )
-    st.stop()
-
-if not FEATURE_MATRIX_PATH.exists():
-    st.error(
-        f"Feature matrix file not found at\n\n`{FEATURE_MATRIX_PATH}`.\n\n"
-        "Export `feature_matrix.csv` into the data folder first."
-    )
-    st.stop()
+for path, label in [
+    (MODEL_PATH, "Model file"),
+    (BASELINES_PATH, "Country baseline file"),
+    (FEATURES_PATH, "Model feature file"),
+    (FEATURE_MATRIX_PATH, "Feature matrix file"),
+]:
+    if not path.exists():
+        st.error(f"{label} not found at `{path}`.")
+        st.stop()
 
 model = load_model(MODEL_PATH)
 country_baselines = load_country_baselines(BASELINES_PATH)
 model_features = load_model_features(FEATURES_PATH)
 feature_matrix = load_feature_matrix(FEATURE_MATRIX_PATH)
+classification_threshold = load_optimal_threshold(THRESHOLD_PATH, default=0.35)
 
 if country_baselines.empty:
     st.error("Country baselines file is empty.")
@@ -220,7 +207,22 @@ st.subheader(f"Country baseline: {selected_country_name}")
 
 left_col, right_col = st.columns([1.1, 1.1])
 
-editable_features = [feature for feature in model_features if feature in scenario_values]
+# Keep the main app focused on the most interpretable inputs
+priority_features = [
+    "unemployment",
+    "inflation",
+    "gdp_growth",
+    "life_expectancy",
+    "population_growth",
+    "unemployment_change_1y",
+    "inflation_change_1y",
+    "gdp_growth_change_1y",
+    "unemployment_trend_3y",
+    "inflation_trend_3y",
+    "gdp_growth_trend_3y",
+]
+
+editable_features = [feature for feature in priority_features if feature in model_features and feature in scenario_values]
 
 with left_col:
     st.markdown("### Adjust macroeconomic inputs")
@@ -243,7 +245,7 @@ model_input = build_model_input_row(
 )
 
 probability = float(model.predict_proba(model_input)[0, 1])
-prediction = int(probability >= CLASSIFICATION_THRESHOLD)
+prediction = int(probability >= classification_threshold)
 
 with right_col:
     st.markdown("### Predicted downturn risk")
@@ -252,7 +254,7 @@ with right_col:
         value=f"{probability:.1%}",
     )
 
-    st.caption(f"Classification threshold: {CLASSIFICATION_THRESHOLD:.2f}")
+    st.caption(f"Classification threshold: {classification_threshold:.2f}")
 
     if prediction == 1:
         st.error("Model classification: downturn risk")
@@ -276,8 +278,7 @@ with right_col:
             }
         )
 
-    comparison_df = pd.DataFrame(comparison_rows)
-    st.dataframe(comparison_df, width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(comparison_rows), width="stretch", hide_index=True)
 
 st.markdown("---")
 
@@ -317,10 +318,7 @@ if hasattr(model, "feature_importances_"):
         y="feature_display",
         orientation="h",
         template="plotly_dark",
-        labels={
-            "importance": "Importance",
-            "feature_display": "Feature",
-        },
+        labels={"importance": "Importance", "feature_display": "Feature"},
         title="Top model feature importances",
     )
 
@@ -335,5 +333,5 @@ if hasattr(model, "feature_importances_"):
 st.markdown("---")
 st.caption(
     "This dashboard uses the trained Part 3 classification model to estimate "
-    "next-year downturn risk from current and lagged macroeconomic indicators."
+    "next-year downturn risk from current levels, annual changes, and 3-year macroeconomic trends."
 )

@@ -12,22 +12,30 @@ def apply_scenario_preset(country_row: dict, preset: str) -> dict:
     if preset == "Inflation shock":
         values["inflation"] = float(values.get("inflation", 0.0)) + 3.0
         values["inflation_change_1y"] = float(values.get("inflation_change_1y", 0.0)) + 2.0
+        values["inflation_trend_3y"] = float(values.get("inflation_trend_3y", 0.0)) + 1.0
 
     elif preset == "Growth slowdown":
         values["gdp_growth"] = float(values.get("gdp_growth", 0.0)) - 2.5
         values["gdp_growth_change_1y"] = float(values.get("gdp_growth_change_1y", 0.0)) - 2.0
+        values["gdp_growth_trend_3y"] = float(values.get("gdp_growth_trend_3y", 0.0)) - 1.0
 
     elif preset == "Labour market deterioration":
         values["unemployment"] = float(values.get("unemployment", 0.0)) + 2.0
         values["unemployment_change_1y"] = float(values.get("unemployment_change_1y", 0.0)) + 1.5
+        values["unemployment_trend_3y"] = float(values.get("unemployment_trend_3y", 0.0)) + 0.8
 
     elif preset == "Broad downturn stress":
         values["gdp_growth"] = float(values.get("gdp_growth", 0.0)) - 3.0
         values["gdp_growth_change_1y"] = float(values.get("gdp_growth_change_1y", 0.0)) - 2.5
+        values["gdp_growth_trend_3y"] = float(values.get("gdp_growth_trend_3y", 0.0)) - 1.0
+
         values["inflation"] = float(values.get("inflation", 0.0)) + 2.5
         values["inflation_change_1y"] = float(values.get("inflation_change_1y", 0.0)) + 1.5
+        values["inflation_trend_3y"] = float(values.get("inflation_trend_3y", 0.0)) + 0.8
+
         values["unemployment"] = float(values.get("unemployment", 0.0)) + 2.5
         values["unemployment_change_1y"] = float(values.get("unemployment_change_1y", 0.0)) + 1.5
+        values["unemployment_trend_3y"] = float(values.get("unemployment_trend_3y", 0.0)) + 0.8
 
     return values
 
