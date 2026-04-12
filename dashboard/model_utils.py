@@ -46,3 +46,8 @@ def load_optimal_threshold(path: str | Path, default: float = 0.35) -> float:
         return default
 
     return float(df.loc[0, "optimal_threshold"])
+
+
+def load_panel_data(path: str | Path) -> pd.DataFrame:
+    path = Path(path)
+    return pd.read_csv(path)

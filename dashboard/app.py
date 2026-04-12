@@ -18,6 +18,7 @@ from dashboard.model_utils import (
     load_model_features,
     load_feature_matrix,
     load_optimal_threshold,
+    load_panel_data,
 )
 from dashboard.scenario_utils import (
     apply_scenario_preset,
@@ -35,6 +36,7 @@ BASELINES_PATH = PROJECT_ROOT / "models" / "country_baselines_latest.csv"
 FEATURES_PATH = PROJECT_ROOT / "models" / "model_features.csv"
 FEATURE_MATRIX_PATH = PROJECT_ROOT / "data" / "feature_matrix.csv"
 THRESHOLD_PATH = PROJECT_ROOT / "models" / "optimal_threshold.csv"
+PANEL_PATH = PROJECT_ROOT / "data" / "worldbank_panel_final.csv"
 
 FEATURE_LABELS = {
     "gdp_growth": "GDP growth",
@@ -89,15 +91,24 @@ def prettify_feature_name(name: str) -> str:
 
 def feature_slider_bounds(feature: str) -> tuple[float, float, float]:
     if "life_expectancy" in feature:
-        return -10.0 if "change" in feature or "trend" in feature else 30.0, 10.0 if "change" in feature or "trend" in feature else 90.0, 0.1
+        if "change" in feature or "trend" in feature:
+            return -10.0, 10.0, 0.1
+        return 30.0, 90.0, 0.1
+
     if "population_growth" in feature:
         return -5.0, 10.0, 0.1
+
     if "gdp_growth" in feature:
         return -20.0, 20.0, 0.1
+
     if "inflation" in feature:
         return -20.0, 50.0, 0.1
+
     if "unemployment" in feature:
-        return -10.0 if "change" in feature or "trend" in feature else 0.0, 50.0, 0.1
+        if "change" in feature or "trend" in feature:
+            return -10.0, 10.0, 0.1
+        return 0.0, 50.0, 0.1
+
     return -20.0, 20.0, 0.1
 
 
@@ -135,6 +146,35 @@ def find_similar_countries(
     )
 
 
+def plot_multi_country_timeseries(
+    panel_df: pd.DataFrame,
+    country_names: list[str],
+    feature: str,
+    title: str | None = None,
+):
+    plot_df = panel_df.loc[panel_df["country"].isin(country_names)].copy()
+
+    fig = px.line(
+        plot_df,
+        x="year",
+        y=feature,
+        color="country",
+        markers=True,
+        title=title or f"{prettify_feature_name(feature)} comparison across countries",
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        xaxis_title="Year",
+        yaxis_title=prettify_feature_name(feature),
+        height=500,
+        legend_title_text="Country",
+        title_x=0.0,
+    )
+
+    return fig
+
+
 st.title("Macroeconomic Downturn Risk Simulator")
 st.write(
     "Choose a country, adjust macroeconomic conditions, and estimate the model's "
@@ -146,6 +186,7 @@ for path, label in [
     (BASELINES_PATH, "Country baseline file"),
     (FEATURES_PATH, "Model feature file"),
     (FEATURE_MATRIX_PATH, "Feature matrix file"),
+    (PANEL_PATH, "Panel data file"),
 ]:
     if not path.exists():
         st.error(f"{label} not found at `{path}`.")
@@ -156,6 +197,10 @@ country_baselines = load_country_baselines(BASELINES_PATH)
 model_features = load_model_features(FEATURES_PATH)
 feature_matrix = load_feature_matrix(FEATURE_MATRIX_PATH)
 classification_threshold = load_optimal_threshold(THRESHOLD_PATH, default=0.35)
+panel_df = load_panel_data(PANEL_PATH)
+
+if "country" not in panel_df.columns:
+    panel_df["country"] = panel_df["country_code"]
 
 if country_baselines.empty:
     st.error("Country baselines file is empty.")
@@ -207,7 +252,6 @@ st.subheader(f"Country baseline: {selected_country_name}")
 
 left_col, right_col = st.columns([1.1, 1.1])
 
-# Keep the main app focused on the most interpretable inputs
 priority_features = [
     "unemployment",
     "inflation",
@@ -222,7 +266,10 @@ priority_features = [
     "gdp_growth_trend_3y",
 ]
 
-editable_features = [feature for feature in priority_features if feature in model_features and feature in scenario_values]
+editable_features = [
+    feature for feature in priority_features
+    if feature in model_features and feature in scenario_values
+]
 
 with left_col:
     st.markdown("### Adjust macroeconomic inputs")
@@ -295,6 +342,79 @@ if similar_df.empty:
     st.info("No similar-country comparison is available for this selection.")
 else:
     st.dataframe(similar_df, width="stretch", hide_index=True)
+
+st.markdown("---")
+st.subheader("Multi-country time series comparison")
+
+timeseries_feature_groups = {
+    "Levels": {
+        "GDP growth": "gdp_growth",
+        "Inflation": "inflation",
+        "Unemployment": "unemployment",
+        "Life expectancy": "life_expectancy",
+        "Population growth": "population_growth",
+    },
+    "Annual changes": {
+        "GDP growth (1-year change)": "gdp_growth_change_1y",
+        "Inflation (1-year change)": "inflation_change_1y",
+        "Unemployment (1-year change)": "unemployment_change_1y",
+        "Life expectancy (1-year change)": "life_expectancy_change_1y",
+        "Population growth (1-year change)": "population_growth_change_1y",
+    },
+    "3-year trends": {
+        "GDP growth trend (3 years)": "gdp_growth_trend_3y",
+        "Inflation trend (3 years)": "inflation_trend_3y",
+        "Unemployment trend (3 years)": "unemployment_trend_3y",
+        "Life expectancy trend (3 years)": "life_expectancy_trend_3y",
+        "Population growth trend (3 years)": "population_growth_trend_3y",
+    },
+}
+
+group_col, feature_col = st.columns([1, 1])
+
+with group_col:
+    selected_feature_group = st.selectbox(
+        "Select feature group",
+        options=list(timeseries_feature_groups.keys()),
+        index=0,
+    )
+
+feature_options = timeseries_feature_groups[selected_feature_group]
+
+with feature_col:
+    selected_timeseries_label = st.selectbox(
+        "Select feature",
+        options=list(feature_options.keys()),
+        index=0,
+    )
+
+selected_timeseries_feature = feature_options[selected_timeseries_label]
+
+default_country_set = [selected_country_name]
+if not similar_df.empty:
+    for similar_country in similar_df["Country"].tolist():
+        if similar_country != selected_country_name and len(default_country_set) < 4:
+            default_country_set.append(similar_country)
+
+country_selection_options = sorted(panel_df["country"].dropna().unique().tolist())
+
+selected_timeseries_countries = st.multiselect(
+    "Select up to 4 countries",
+    options=country_selection_options,
+    default=default_country_set,
+    max_selections=4,
+)
+
+if selected_timeseries_countries:
+    fig = plot_multi_country_timeseries(
+        panel_df=panel_df,
+        country_names=selected_timeseries_countries,
+        feature=selected_timeseries_feature,
+        title=f"{selected_timeseries_label} comparison across selected countries",
+    )
+    st.plotly_chart(fig, width="stretch")
+else:
+    st.info("Select at least one country to display the time series chart.")
 
 if hasattr(model, "feature_importances_"):
     st.markdown("---")
