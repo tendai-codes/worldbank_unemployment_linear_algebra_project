@@ -1,143 +1,102 @@
-# World Bank Linear Algebra Project
+# Macroeconomic Downturn Prediction Using Linear Algebra and Machine Learning
 
-This project uses World Bank API data to study matrix structure in cross-country macroeconomic data and extend that analysis into a simple predictive downturn-risk model.
+## Live app
 
-## Project goals
+Deployed dashboard: https://macroeconomic-risk.streamlit.app/
 
-### Part 1: Unemployment-only analysis
-Build a **country × year** unemployment matrix and study:
+## Problem
 
-- missingness structure
-- matrix rank
-- REF and RREF on a subset
-- correlation between years
-- country similarity
-- PCA on unemployment trajectories
+This project constructs a country-year macroeconomic panel dataset from World Bank indicators and applies linear algebra and supervised learning techniques to estimate the probability that a country will experience an economic downturn in the following year.
 
-### Part 2: Multi-indicator matrix analysis
-Build a **country × feature** matrix using:
+The main goal is to represent each country-year observation as a vector in macroeconomic feature space, analyse how those vectors evolve over time, and use those representations for classification and scenario simulation.
 
-- unemployment
-- inflation
+## Linear algebra perspective
+
+Each country-year observation is represented as a feature vector:
+
+x ∈ ℝⁿ
+
+using macroeconomic indicators such as:
+
 - GDP growth
+- inflation
+- unemployment
 - life expectancy
 - population growth
 
-Then analyse:
+The project expands these vectors with temporal structure using:
 
-- missingness
-- rank
-- feature correlation
-- country similarity
-- PCA
+- lag features
+- annual change features
+- 3-year trend features
 
-### Part 3: Predictive modelling
-Use the cleaned **country-year panel** to classify **next-year downturn risk** with tree-based models.
+This supports three linear algebra ideas:
 
-## Project structure
+1. **Feature-space representation**  
+   Countries are embedded as vectors in a common macroeconomic space.
 
-```text
-worldbank_unemployment_linear_algebra/
-├── README.md
-├── main.py
-├── requirements.txt
-├── requirements-dashboard.txt
-├── RUN_DASHBOARD.md
-├── train_downturn_model.py
-├── src/
-├── dashboard/
-├── notebooks/
-├── data/
-├── models/
-└── output/
-```
+2. **Temporal transformation**  
+   Annual changes and rolling least-squares slopes capture direction and momentum.
 
-## Why the code is split into modules
+3. **Similarity geometry**  
+   Similar countries are identified using Euclidean distance in feature space.
 
-- `src/config.py` → constants and indicator codes
-- `src/api_client.py` → World Bank API access
-- `src/data_processing.py` → DataFrame and matrix construction
-- `src/matrix_analysis.py` → rank, REF/RREF, similarity, PCA
-- `src/pipeline.py` → step-by-step project workflow
-- `main.py` → entry point
-- `train_downturn_model.py` → Part 3 model training and artifact generation
-- `dashboard/` → scenario simulation dashboard for the Part 3 model
+## Project workflow
 
-## Setup
+The workflow consists of four stages:
 
-Create and activate a virtual environment:
+1. Build a cleaned country-year panel dataset from World Bank indicators
+2. Create matrix-style representations with lag, delta, and trend features
+3. Train classification models to estimate next-year downturn risk
+4. Deploy an interactive Streamlit dashboard for scenario testing and multi-country comparison
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
+## Key outputs
 
-Install core requirements:
+### 1. Predictive model
+The project trains classification models on country-year macroeconomic feature vectors to estimate the probability of a downturn in the following year.
 
-```bash
-pip install -r requirements.txt
-```
+### 2. Streamlit dashboard
+The dashboard allows users to:
 
-Install dashboard requirements as well if you want to run the simulation app:
+- select a country
+- adjust macroeconomic conditions
+- simulate alternative economic scenarios
+- estimate predicted downturn probability
+- compare similar countries
+- view multi-country time-series charts across levels, annual changes, and trends
+
+Live app: https://macroeconomic-risk.streamlit.app/
+
+### 3. Time-series diagnostics notebook
+The diagnostics notebook visualises:
+
+- raw macroeconomic levels
+- annual changes
+- 3-year least-squares trends
+- downturn-next-year overlays
+
+This notebook helps justify the inclusion of temporal features in the final model.
+
+## Time-series diagnostics
+
+The repository also includes a time-series diagnostics notebook that visualises:
+
+- raw macroeconomic levels
+- annual changes
+- 3-year least-squares trends
+- downturn-next-year overlays
+
+This notebook is used to interpret whether downturn periods are better explained by structural levels, short-term deterioration, or sustained medium-term trends.
+
+These diagnostics support the feature engineering choices used in the predictive model, particularly the inclusion of delta and trend features.
+
+## Run locally
+
+Install dependencies:
 
 ```bash
 pip install -r requirements-dashboard.txt
-```
 
-## Run the core analysis
+python train_downturn_model.py
 
-```bash
-python main.py
-```
-
-## Export notebook outputs to `data/`
-
-Run this cell near the end of your notebook after the relevant dataframes have been created:
-
-```python
-from pathlib import Path
-
-data_dir = Path("../data") if Path.cwd().name == "notebooks" else Path("data")
-data_dir.mkdir(parents=True, exist_ok=True)
-
-if "df_unemployment" in globals():
-    df_unemployment.to_csv(data_dir / "unemployment.csv", index=False)
-
-if "unemployment_matrix" in globals():
-    unemployment_matrix.to_csv(data_dir / "unemployment_matrix.csv", index=True)
-
-if "indicator_dataframes" in globals():
-    for name, df in indicator_dataframes.items():
-        df.to_csv(data_dir / f"{name}.csv", index=False)
-
-if "panel_df" in globals():
-    panel_df.to_csv(data_dir / "worldbank_panel.csv", index=False)
-
-if "panel_df_final" in globals():
-    panel_df_final.to_csv(data_dir / "worldbank_panel_final.csv", index=False)
-
-if "feature_matrix" in globals():
-    feature_matrix.to_csv(data_dir / "feature_matrix.csv", index=True)
-
-print("Export complete. Files saved to:", data_dir.resolve())
-```
-
-## Expected data artifacts
-
-The analysis should save CSV snapshots in `data/` such as:
-
-- `unemployment.csv`
-- `unemployment_matrix.csv`
-- `inflation.csv`
-- `gdp_growth.csv`
-- `life_expectancy.csv`
-- `population_growth.csv`
-- `worldbank_panel.csv`
-- `worldbank_panel_final.csv`
-- `feature_matrix.csv`
-
-## Note on REF / RREF
-
-REF and RREF are computed on a smaller rounded subset of the unemployment matrix.
-
-For large real-valued economic matrices, exact symbolic row reduction becomes messy and less interpretable. Numeric rank is the serious tool. REF/RREF is included mainly to demonstrate linear algebra reasoning.
+python -m streamlit run dashboard/app.py
