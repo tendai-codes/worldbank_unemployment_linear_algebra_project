@@ -1,0 +1,35 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Rust: build engineered World Bank CSV",
+      "type": "shell",
+      "command": "cargo run -- ../data/worldbank_panel_final.csv ../data/worldbank_panel_engineered_rust.csv",
+      "options": {
+        "cwd": "${workspaceFolder}/rust_pipeline"
+      },
+      "group": "build",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "Python: train downturn model",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python train_downturn_model.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Python: run Streamlit dashboard",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python -m streamlit run dashboard/app.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}

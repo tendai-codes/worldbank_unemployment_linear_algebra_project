@@ -1,6 +1,25 @@
+# Python environments
 .venv/
+venv/
+env/
+bin/
+lib/
+include/
+pyvenv.cfg
+
+# Python cache
 __pycache__/
+*.py[cod]
 .ipynb_checkpoints/
+
+# Jupyter
+.jupyter/
+
+# Rust
+rust_pipeline/target/
+
+# macOS
 .DS_Store
-*.pyc
+
+# Local databases
 *.sqlite3
