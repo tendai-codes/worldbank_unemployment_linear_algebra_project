@@ -452,8 +452,7 @@ if hasattr(model, "feature_importances_"):
 
 st.markdown("---")
 st.caption(
-    "This dashboard uses the trained Part 3 classification model and Rust-engineered "
-    "country-year panel to estimate next-year downturn risk from current levels, "
-    "annual changes, and 3-year macroeconomic trends."
+    "Predictions are based on country-level macroeconomic conditions, including current values, "
+    "year-on-year changes, and recent 3-year trends."
 )
 
