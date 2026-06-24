@@ -36,7 +36,7 @@ BASELINES_PATH = PROJECT_ROOT / "models" / "country_baselines_latest.csv"
 FEATURES_PATH = PROJECT_ROOT / "models" / "model_features.csv"
 FEATURE_MATRIX_PATH = PROJECT_ROOT / "data" / "feature_matrix.csv"
 THRESHOLD_PATH = PROJECT_ROOT / "models" / "optimal_threshold.csv"
-PANEL_PATH = PROJECT_ROOT / "data" / "worldbank_panel_final.csv"
+PANEL_PATH = PROJECT_ROOT / "data" / "worldbank_panel_engineered_rust.csv"
 
 FEATURE_LABELS = {
     "gdp_growth": "GDP growth",
@@ -452,6 +452,8 @@ if hasattr(model, "feature_importances_"):
 
 st.markdown("---")
 st.caption(
-    "This dashboard uses the trained Part 3 classification model to estimate "
-    "next-year downturn risk from current levels, annual changes, and 3-year macroeconomic trends."
+    "This dashboard uses the trained Part 3 classification model and Rust-engineered "
+    "country-year panel to estimate next-year downturn risk from current levels, "
+    "annual changes, and 3-year macroeconomic trends."
 )
+

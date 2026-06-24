@@ -10,6 +10,35 @@ This project constructs a country-year macroeconomic panel dataset from World Ba
 
 The main goal is to represent each country-year observation as a vector in macroeconomic feature space, analyse how those vectors evolve over time, and use those representations for classification and scenario simulation.
 
+## Scalable architecture
+
+The project now separates data engineering from modelling:
+
+```text
+Rust
+→ CSV ingestion
+→ validation
+→ lag features
+→ annual changes
+→ 3-year least-squares trend slopes
+→ engineered dataset export
+
+Python
+→ notebooks
+→ PCA and cosine similarity
+→ downturn model training
+→ Streamlit dashboard
+```
+
+The main engineered dataset is:
+
+```text
+data/worldbank_panel_engineered_rust.csv
+```
+
+This file is produced by the Rust CLI and consumed by the Python training script and Streamlit dashboard.
+
+
 ## Linear algebra perspective
 
 Each country-year observation is represented as a feature vector:
@@ -45,17 +74,26 @@ This supports three linear algebra ideas:
 
 The workflow consists of four stages:
 
-1. Build a cleaned country-year panel dataset from World Bank indicators
-2. Create matrix-style representations with lag, delta, and trend features
-3. Train classification models to estimate next-year downturn risk
-4. Deploy an interactive Streamlit dashboard for scenario testing and multi-country comparison
+1. Build a cleaned country-year panel dataset from World Bank indicators.
+2. Use Rust to create deterministic lag, annual-change, trend, and target features.
+3. Train a Python classification model on the Rust-engineered dataset.
+4. Deploy an interactive Streamlit dashboard for scenario testing and multi-country comparison.
 
 ## Key outputs
 
-### 1. Predictive model
-The project trains classification models on country-year macroeconomic feature vectors to estimate the probability of a downturn in the following year.
+### 1. Rust-engineered panel
 
-### 2. Streamlit dashboard
+```text
+data/worldbank_panel_engineered_rust.csv
+```
+
+Contains raw macroeconomic levels plus lag, annual-change, trend, and downturn-target features.
+
+### 2. Predictive model
+
+The project trains a Random Forest classifier on country-year macroeconomic feature vectors to estimate the probability of a downturn in the following year.
+
+### 3. Streamlit dashboard
 The dashboard allows users to:
 
 - select a country
@@ -67,7 +105,7 @@ The dashboard allows users to:
 
 Live app: https://macroeconomic-risk.streamlit.app/
 
-### 3. Time-series diagnostics notebook
+### 4. Time-series diagnostics notebook
 The diagnostics notebook visualises:
 
 - raw macroeconomic levels
@@ -92,11 +130,47 @@ These diagnostics support the feature engineering choices used in the predictive
 
 ## Run locally
 
-Install dependencies:
+Install Python dependencies:
 
 ```bash
-pip install -r requirements-dashboard.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dashboard.txt
+```
 
+Generate engineered features with Rust:
+
+```bash
+./scripts/run_rust_pipeline.sh
+```
+
+Train the model from the Rust-engineered dataset:
+
+```bash
 python train_downturn_model.py
+```
 
+Run the dashboard:
+
+```bash
 python -m streamlit run dashboard/app.py
+```
+
+## Rust pipeline
+
+The Rust CLI lives in:
+
+```text
+rust_pipeline/
+```
+
+Run manually:
+
+```bash
+cd rust_pipeline
+cargo run -- ../data/worldbank_panel_final.csv ../data/worldbank_panel_engineered_rust.csv
+```
+
+See `RUN_RUST_AND_PYTHON.md` for the full VS Code workflow.

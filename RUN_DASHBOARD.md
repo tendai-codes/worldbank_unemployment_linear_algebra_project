@@ -1,126 +1,78 @@
-## Access using forllowing link - https://macroeconomic-risk.streamlit.app/ or run manually using instructions below
+# Downturn Dashboard: Run Guide
 
-# Downturn dashboard: run guide
-
-## Place these files in your repo
-
-Recommended project structure:
+The dashboard now uses the scalable Rust + Python workflow.
 
 ```text
-worldbank_unemployment_linear_algebra/
-├── train_downturn_model.py
-├── requirements-dashboard.txt
-├── dashboard/
-│   ├── app.py
-│   ├── model_utils.py
-│   └── scenario_utils.py
-├── data/
-│   ├── worldbank_panel_final.csv
-│   └── ...
-├── models/
-│   └── (created after training)
+Rust feature engineering
+→ data/worldbank_panel_engineered_rust.csv
+→ Python model training
+→ Streamlit dashboard
 ```
 
 ## 1. Install dependencies
 
 ```bash
-pip install -r requirements-dashboard.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dashboard.txt
 ```
 
-If you already use a project `requirements.txt`, you can merge these lines into it instead:
+Rust must also be available:
+
+```bash
+rustc --version
+cargo --version
+```
+
+## 2. Generate the Rust-engineered dataset
+
+From the project root:
+
+```bash
+./scripts/run_rust_pipeline.sh
+```
+
+This creates:
 
 ```text
-streamlit
-plotly
-joblib
-pandas
-scikit-learn
-```
-
-## 2. Save your cleaned panel CSV
-
-The training script looks for one of these files:
-
-```text
-data/worldbank_panel_final.csv
-data/worldbank_panel.csv
-```
-
-The CSV must contain at least these columns:
-
-- `country_code`
-- `year`
-- `unemployment`
-- `inflation`
-- `gdp_growth`
-- `life_expectancy`
-- `population_growth`
-
-Run this export cell near the end of your notebook:
-
-```python
-from pathlib import Path
-
-data_dir = Path("../data") if Path.cwd().name == "notebooks" else Path("data")
-data_dir.mkdir(parents=True, exist_ok=True)
-
-if "df_unemployment" in globals():
-    df_unemployment.to_csv(data_dir / "unemployment.csv", index=False)
-
-if "unemployment_matrix" in globals():
-    unemployment_matrix.to_csv(data_dir / "unemployment_matrix.csv", index=True)
-
-if "indicator_dataframes" in globals():
-    for name, df in indicator_dataframes.items():
-        df.to_csv(data_dir / f"{name}.csv", index=False)
-
-if "panel_df" in globals():
-    panel_df.to_csv(data_dir / "worldbank_panel.csv", index=False)
-
-if "panel_df_final" in globals():
-    panel_df_final.to_csv(data_dir / "worldbank_panel_final.csv", index=False)
-
-if "feature_matrix" in globals():
-    feature_matrix.to_csv(data_dir / "feature_matrix.csv", index=True)
-
-print("Export complete. Files saved to:", data_dir.resolve())
+data/worldbank_panel_engineered_rust.csv
 ```
 
 ## 3. Train the dashboard model
-
-From the project root:
 
 ```bash
 python train_downturn_model.py
 ```
 
-This creates a `models/` folder with:
+The training script now expects the Rust-engineered CSV. It creates or updates:
 
-- `downturn_random_forest.joblib`
-- `model_features.csv`
-- `cv_metrics.csv`
-- `country_baselines_latest.csv`
+```text
+models/downturn_random_forest.joblib
+models/model_features.csv
+models/cv_metrics.csv
+models/optimal_threshold.csv
+models/country_baselines_latest.csv
+data/feature_matrix.csv
+```
 
 ## 4. Run the dashboard
 
-From the project root:
-
 ```bash
-streamlit run dashboard/app.py
+python -m streamlit run dashboard/app.py
 ```
 
-## 5. What the dashboard does
+## 5. Full rebuild command sequence
 
-- loads the trained Random Forest model
-- loads the latest baseline values for each country
-- lets you pick a country baseline
-- lets you adjust current and lagged indicators
-- predicts next-year downturn probability
-- shows baseline vs scenario changes
-- shows top feature importances
+```bash
+./scripts/run_rust_pipeline.sh
+python train_downturn_model.py
+python -m streamlit run dashboard/app.py
+```
 
 ## Notes
 
-- Run `python train_downturn_model.py` again whenever you update the cleaned panel data.
-- If Streamlit says the model file is missing, it means the training step has not been run yet.
-- The dashboard uses the Part 3 binary target: next year's GDP growth below zero.
+- The dashboard reads `data/worldbank_panel_engineered_rust.csv` for time-series views.
+- The model is trained from the same Rust-engineered dataset.
+- Re-run the Rust pipeline and training script whenever `data/worldbank_panel_final.csv` changes.

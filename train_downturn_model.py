@@ -24,98 +24,30 @@ MODELS_DIR = PROJECT_ROOT / "models"
 
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-PANEL_FINAL_PATH = DATA_DIR / "worldbank_panel_final.csv"
-PANEL_FALLBACK_PATH = DATA_DIR / "worldbank_panel.csv"
+ENGINEERED_PANEL_PATH = DATA_DIR / "worldbank_panel_engineered_rust.csv"
+RAW_PANEL_PATH = DATA_DIR / "worldbank_panel_final.csv"
+RUST_RUN_HINT = (
+    "Run the Rust feature engineering pipeline first:\n"
+    "  cd rust_pipeline\n"
+    "  cargo run -- ../data/worldbank_panel_final.csv ../data/worldbank_panel_engineered_rust.csv"
+)
 
 
-def load_panel() -> pd.DataFrame:
-    if PANEL_FINAL_PATH.exists():
-        return pd.read_csv(PANEL_FINAL_PATH)
-    if PANEL_FALLBACK_PATH.exists():
-        return pd.read_csv(PANEL_FALLBACK_PATH)
+def load_engineered_panel() -> pd.DataFrame:
+    """Load the Rust-engineered modelling panel."""
+    if ENGINEERED_PANEL_PATH.exists():
+        return pd.read_csv(ENGINEERED_PANEL_PATH)
+
     raise FileNotFoundError(
-        "Could not find input panel CSV. Expected one of:\n"
-        f"- {PANEL_FINAL_PATH}\n"
-        f"- {PANEL_FALLBACK_PATH}"
+        "Rust-engineered panel not found. Expected:\n"
+        f"- {ENGINEERED_PANEL_PATH}\n\n"
+        f"Source panel exists: {RAW_PANEL_PATH.exists()}\n\n"
+        f"{RUST_RUN_HINT}"
     )
-
-
-def slope_3(values: np.ndarray) -> float:
-    """
-    Least-squares slope across three consecutive observations.
-    """
-    x = np.array([0.0, 1.0, 2.0], dtype=float)
-    y = np.asarray(values, dtype=float)
-    return float(np.polyfit(x, y, 1)[0])
-
-
-def add_trend_feature(df: pd.DataFrame, source_col: str, target_col: str) -> pd.DataFrame:
-    def rolling_slope(series: pd.Series) -> pd.Series:
-        return series.rolling(3).apply(lambda x: slope_3(np.array(x)), raw=False)
-
-    df[target_col] = (
-        df.groupby("country_code")[source_col]
-        .transform(rolling_slope)
-    )
-    return df
-
-
-def build_modelling_dataset(panel_df: pd.DataFrame) -> pd.DataFrame:
-    required_cols = [
-        "country_code",
-        "year",
-        "unemployment",
-        "inflation",
-        "gdp_growth",
-        "life_expectancy",
-        "population_growth",
-    ]
-
-    # Optional but preferred for nicer dashboard labels
-    keep_country_name = "country" in panel_df.columns
-
-    missing = [c for c in required_cols if c not in panel_df.columns]
-    if missing:
-        raise ValueError(f"Missing required columns in panel data: {missing}")
-
-    cols = required_cols.copy()
-    if keep_country_name:
-        cols.insert(0, "country")
-
-    df = panel_df[cols].copy()
-    df = df.sort_values(["country_code", "year"]).reset_index(drop=True)
-
-    # Next-year target
-    df["gdp_growth_next_year"] = df.groupby("country_code")["gdp_growth"].shift(-1)
-    df["downturn_risk_next_year"] = (df["gdp_growth_next_year"] < 0).astype(int)
-
-    base_features = [
-        "unemployment",
-        "inflation",
-        "gdp_growth",
-        "life_expectancy",
-        "population_growth",
-    ]
-
-    # Lag features
-    for col in base_features:
-        df[f"{col}_lag1"] = df.groupby("country_code")[col].shift(1)
-        df[f"{col}_lag2"] = df.groupby("country_code")[col].shift(2)
-
-    # Delta features
-    for col in base_features:
-        df[f"{col}_change_1y"] = df[col] - df[f"{col}_lag1"]
-
-    # Trend features over 3 years using least-squares slope
-    for col in base_features:
-        df = add_trend_feature(df, col, f"{col}_trend_3y")
-
-    # Drop incomplete rows after lag/trend construction
-    df = df.dropna().reset_index(drop=True)
-    return df
 
 
 def get_feature_columns() -> list[str]:
+    """Return the exact model feature columns produced by the Rust pipeline."""
     return [
         # current levels
         "unemployment",
@@ -134,19 +66,58 @@ def get_feature_columns() -> list[str]:
         "gdp_growth_lag2",
         "life_expectancy_lag2",
         "population_growth_lag2",
-        # delta features
+        # annual change features
         "unemployment_change_1y",
         "inflation_change_1y",
         "gdp_growth_change_1y",
         "life_expectancy_change_1y",
         "population_growth_change_1y",
-        # trend features
+        # 3-year least-squares trend features
         "unemployment_trend_3y",
         "inflation_trend_3y",
         "gdp_growth_trend_3y",
         "life_expectancy_trend_3y",
         "population_growth_trend_3y",
     ]
+
+
+def build_modelling_dataset(engineered_df: pd.DataFrame) -> pd.DataFrame:
+    """Validate and prepare the Rust-engineered panel for model training."""
+    feature_cols = get_feature_columns()
+    target_col = "downturn_risk_next_year"
+
+    required_cols = [
+        "country_code",
+        "year",
+        target_col,
+        *feature_cols,
+    ]
+
+    keep_country_name = "country" in engineered_df.columns
+    if keep_country_name:
+        required_cols.insert(0, "country")
+
+    missing = [col for col in required_cols if col not in engineered_df.columns]
+    if missing:
+        raise ValueError(
+            "Missing required Rust-engineered columns: "
+            f"{missing}\n\n{RUST_RUN_HINT}"
+        )
+
+    model_df = engineered_df[required_cols].copy()
+    model_df = model_df.sort_values(["country_code", "year"]).reset_index(drop=True)
+
+    numeric_cols = ["year", target_col, *feature_cols]
+    for col in numeric_cols:
+        model_df[col] = pd.to_numeric(model_df[col], errors="coerce")
+
+    model_df = model_df.dropna(subset=[target_col, *feature_cols]).reset_index(drop=True)
+    model_df[target_col] = model_df[target_col].astype(int)
+
+    if model_df.empty:
+        raise ValueError("No complete modelling rows remain after loading the Rust-engineered panel.")
+
+    return model_df
 
 
 def compute_optimal_threshold(y_true: pd.Series, y_score: np.ndarray) -> float:
@@ -168,9 +139,20 @@ def evaluate_with_threshold(y_true: pd.Series, y_score: np.ndarray, threshold: f
     }
 
 
+def save_country_feature_matrix(model_df: pd.DataFrame, feature_cols: list[str]) -> None:
+    """Save a country-level feature matrix for dashboard similarity search."""
+    feature_matrix = (
+        model_df.groupby("country_code")[feature_cols]
+        .mean()
+        .dropna()
+        .sort_index()
+    )
+    feature_matrix.to_csv(DATA_DIR / "feature_matrix.csv")
+
+
 def main():
-    panel_df = load_panel()
-    model_df = build_modelling_dataset(panel_df)
+    engineered_df = load_engineered_panel()
+    model_df = build_modelling_dataset(engineered_df)
     feature_cols = get_feature_columns()
 
     X = model_df[feature_cols].copy()
@@ -234,22 +216,18 @@ def main():
         threshold=optimal_threshold,
     )
 
-    # Fit final model on all available data
+    # Fit final model on all available Rust-engineered data.
     model.fit(X_sorted, y_sorted)
 
-    # Save trained model
     joblib.dump(model, MODELS_DIR / "downturn_random_forest.joblib")
 
-    # Save feature names
     pd.DataFrame({"feature": feature_cols}).to_csv(
         MODELS_DIR / "model_features.csv",
         index=False,
     )
 
-    # Save CV metrics
     pd.DataFrame(fold_rows).to_csv(MODELS_DIR / "cv_metrics.csv", index=False)
 
-    # Save empirical threshold
     pd.DataFrame(
         {
             "threshold_method": ["youden_j"],
@@ -262,7 +240,6 @@ def main():
         }
     ).to_csv(MODELS_DIR / "optimal_threshold.csv", index=False)
 
-    # Save latest country baselines for dashboard
     baseline_cols = ["country_code"]
     if "country" in model_df.columns:
         baseline_cols.insert(0, "country")
@@ -280,13 +257,17 @@ def main():
         index=False,
     )
 
-    print("Training complete.")
+    save_country_feature_matrix(model_df, feature_cols)
+
+    print("Training complete using Rust-engineered features.")
+    print("Input:", ENGINEERED_PANEL_PATH)
     print("Saved:")
     print("-", MODELS_DIR / "downturn_random_forest.joblib")
     print("-", MODELS_DIR / "model_features.csv")
     print("-", MODELS_DIR / "cv_metrics.csv")
     print("-", MODELS_DIR / "optimal_threshold.csv")
     print("-", MODELS_DIR / "country_baselines_latest.csv")
+    print("-", DATA_DIR / "feature_matrix.csv")
     print(f"Optimal threshold selected by Youden's J: {optimal_threshold:.4f}")
 
 
